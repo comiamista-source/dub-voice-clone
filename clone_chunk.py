@@ -55,17 +55,28 @@ def main():
         run(["ffmpeg","-y","-i",str(inp),"-c","copy",str(out)]); 
         print(f"OUTPUT={out}"); return
 
-    # 3. translate (offline argos)
-    log("Translating...")
-    import argostranslate.package, argostranslate.translate
-    try:
-        argostranslate.package.update_package_index()
-        avail = argostranslate.package.get_available_packages()
-        pkg = next((p for p in avail if p.from_code==args.src and p.to_code==args.target), None)
-        if pkg: argostranslate.package.install_from_path(pkg.download())
-    except Exception as e:
-        log(f"argos index/install note: {e}")
-    tgt_text = argostranslate.translate.translate(src_text, args.src, args.target)
+    # 3. translate with NLLB-200 (much better than offline argos for Hindi->English)
+    log("Translating (NLLB-200)...")
+    from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+    NLLB = {"hi": "hin_Deva", "en": "eng_Latn", "bn":"ben_Beng", "ta":"tam_Taml",
+            "te":"tel_Telu", "mr":"mar_Deva", "gu":"guj_Gujr", "kn":"kan_Knda",
+            "ml":"mal_Mlym", "pa":"pan_Guru", "or":"ory_Orya"}
+    src_code = NLLB.get(args.src, "hin_Deva")
+    tgt_code = NLLB.get(args.target, "eng_Latn")
+    tok_nllb = AutoTokenizer.from_pretrained("facebook/nllb-200-distilled-600M")
+    mdl = AutoModelForSeq2SeqLM.from_pretrained("facebook/nllb-200-distilled-600M")
+    # translate sentence by sentence to keep quality on long text
+    import re as _re
+    parts = [p.strip() for p in _re.split(r"(?<=[.!?।])\s+", src_text) if p.strip()]
+    out_parts = []
+    for p in parts:
+        tok_nllb.src_lang = src_code
+        enc = tok_nllb(p, return_tensors="pt", truncation=True, max_length=512)
+        gen = mdl.generate(**enc,
+            forced_bos_token_id=tok_nllb.convert_tokens_to_ids(tgt_code),
+            max_length=512)
+        out_parts.append(tok_nllb.batch_decode(gen, skip_special_tokens=True)[0])
+    tgt_text = " ".join(out_parts).strip()
     log(f"Translated: {tgt_text[:200]}")
 
     # 4. clone voice with XTTS-v2
