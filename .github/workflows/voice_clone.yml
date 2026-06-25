@@ -80,10 +80,10 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg jq >/dev/null
           curl -fsSL https://rclone.org/install.sh | sudo bash >/dev/null 2>&1
           python3 -m pip install -q --upgrade pip
-          # CPU torch first (coqui + whisper both build on it), then coqui WITH codec
-          # extra (pulls torchcodec for torch>=2.9 audio IO), then the rest.
-          python3 -m pip install -q torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-          python3 -m pip install -q "coqui-tts[codec]" "transformers==4.57.1" sentencepiece faster-whisper
+          # torch 2.8 keeps the torchaudio audio backend (NO torchcodec / no GPU libs
+          # needed). Plain coqui-tts (not [codec]) avoids the torchcodec import.
+          python3 -m pip install -q "torch==2.8.0" "torchaudio==2.8.0" --index-url https://download.pytorch.org/whl/cpu
+          python3 -m pip install -q "coqui-tts==0.26.0" "transformers==4.46.3" sentencepiece faster-whisper
       - name: Connect Drive
         env:
           RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
