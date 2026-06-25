@@ -83,7 +83,7 @@ jobs:
           # torch 2.8 keeps the torchaudio audio backend (NO torchcodec / no GPU libs
           # needed). Plain coqui-tts (not [codec]) avoids the torchcodec import.
           python3 -m pip install -q "torch==2.8.0" "torchaudio==2.8.0" --index-url https://download.pytorch.org/whl/cpu
-          python3 -m pip install -q "coqui-tts==0.26.0" "transformers==4.47.1" sentencepiece faster-whisper click "spacy>=3.2,<3.8"
+          python3 -m pip install -q "coqui-tts==0.26.0" "transformers==4.47.1" sentencepiece click "spacy>=3.2,<3.8"
       - name: Connect Drive
         env:
           RCLONE_CONF: ${{ secrets.RCLONE_CONF }}
@@ -109,6 +109,7 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_HUB_DOWNLOAD_TIMEOUT: "60"
+          SARVAM_API_KEY: ${{ secrets.SARVAM_API_KEY }}
         run: |
           IN=$(ls input/ | head -n1)
           echo "==> Cloning: $IN"
