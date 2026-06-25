@@ -74,7 +74,8 @@ def main():
         enc = tok_nllb(p, return_tensors="pt", truncation=True, max_length=512)
         gen = mdl.generate(**enc,
             forced_bos_token_id=tok_nllb.convert_tokens_to_ids(tgt_code),
-            max_length=512)
+            max_length=512, num_beams=4, no_repeat_ngram_size=3,
+            repetition_penalty=1.3, early_stopping=True)
         out_parts.append(tok_nllb.batch_decode(gen, skip_special_tokens=True)[0])
     tgt_text = " ".join(out_parts).strip()
     log(f"Translated: {tgt_text[:200]}")
