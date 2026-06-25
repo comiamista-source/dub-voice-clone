@@ -1,100 +1,79 @@
 #!/usr/bin/env python3
 """
-Voice-clone dubber for ONE chunk (no Sarvam).
-Pipeline:
-  1. Extract reference audio (the speaker's original voice) from the chunk.
-  2. Transcribe source language with faster-whisper.
-  3. Translate to target language (offline argos-translate).
-  4. Generate target-language speech CLONED from the reference voice (Coqui XTTS-v2).
-  5. Mux the cloned audio onto the chunk video (video copied untouched).
+Voice-clone dubber for ONE chunk - Sarvam text + XTTS voice cloning.
+  1. Extract reference audio (speaker's voice) from the chunk.
+  2. Sarvam saaras:v3 -> clean English text (transcribe+translate, <=28s segments).
+  3. XTTS-v2 -> English speech CLONED from the reference voice.
+  4. Mux cloned audio onto the chunk video.
 
-Usage:
-  python clone_chunk.py INPUT.mp4 --src hi --target en --out OUT.mp4
+Needs env SARVAM_API_KEY. Usage:
+  python clone_chunk.py INPUT.mp4 --out OUT.mp4
 """
-import argparse, os, subprocess, sys, time
-from pathlib import Path
+import argparse, os, subprocess, sys, time, json, base64, urllib.request
 
 def log(m): print(f"[{time.strftime('%H:%M:%S')}] {m}", flush=True)
+def dur(p):
+    r=subprocess.run(["ffprobe","-v","error","-show_entries","format=duration","-of","csv=p=0",p],capture_output=True,text=True)
+    try: return float(r.stdout.strip())
+    except: return 0.0
 
-def run(cmd):
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode != 0:
-        sys.stderr.write(r.stderr[-2000:])
-    return r
+def sarvam_stt_translate(wav, key):
+    """saaras:v3 transcribe+translate, split into <=28s segments (30s API limit)."""
+    total=dur(wav); seg=28.0; texts=[]; i=0; start=0.0
+    while start < total:
+        part=f"_stt_{i}.wav"
+        subprocess.run(["ffmpeg","-y","-ss",str(start),"-t",str(seg),"-i",wav,"-ac","1","-ar","16000",part],capture_output=True)
+        if dur(part)>0.3:
+            r=subprocess.run(["curl","-s","-X","POST","https://api.sarvam.ai/speech-to-text-translate",
+                "-H",f"api-subscription-key: {key}",
+                "-F",f"file=@{part};type=audio/wav","-F","model=saaras:v3"],capture_output=True,text=True)
+            d=json.loads(r.stdout)
+            if "transcript" not in d:
+                raise RuntimeError(d.get("error",{}).get("message",str(d)))
+            texts.append(d["transcript"].strip())
+        start+=seg; i+=1
+    return " ".join(texts).strip()
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("input")
-    ap.add_argument("--src", default="hi")           # whisper/argos code
-    ap.add_argument("--target", default="en")
-    ap.add_argument("--xtts_lang", default="en")     # XTTS output language
-    ap.add_argument("--out", default=None)
-    ap.add_argument("--model", default="large-v3")
-    args = ap.parse_args()
+    ap=argparse.ArgumentParser()
+    ap.add_argument("input"); ap.add_argument("--out", default=None)
+    ap.add_argument("--xtts_lang", default="en")
+    args=ap.parse_args()
 
-    inp = Path(args.input)
-    if not inp.exists():
-        log(f"ERROR: not found {inp}"); sys.exit(1)
-    out = Path(args.out) if args.out else inp.with_name(f"{inp.stem} - CLONED{inp.suffix}")
-    work = Path("clone_work"); work.mkdir(exist_ok=True)
+    key=os.environ.get("SARVAM_API_KEY")
+    if not key:
+        log("ERROR: SARVAM_API_KEY not set"); sys.exit(2)
 
-    # 1. reference audio (clean wav, 22.05k mono is fine for XTTS speaker ref)
-    ref = work / "ref.wav"
+    inp=args.input
+    if not os.path.exists(inp): log(f"ERROR: not found {inp}"); sys.exit(1)
+    out=args.out or (os.path.splitext(inp)[0] + " - English DUB.mp4")
+
+    # 1. reference voice
+    ref="_ref.wav"
     log("Extracting reference voice audio...")
-    run(["ffmpeg","-y","-i",str(inp),"-vn","-ac","1","-ar","22050",str(ref)])
+    subprocess.run(["ffmpeg","-y","-i",inp,"-vn","-ac","1","-ar","22050",ref],capture_output=True)
 
-    # 2. transcribe
-    log(f"Transcribing ({args.model})...")
-    from faster_whisper import WhisperModel
-    m = WhisperModel(args.model, device="cpu", compute_type="int8")
-    segs,_ = m.transcribe(str(ref), language=args.src, vad_filter=True, beam_size=5)
-    src_text = " ".join(s.text.strip() for s in segs).strip()
-    log(f"Source text: {src_text[:200]}")
-    if not src_text:
-        log("No speech detected; copying original audio."); 
-        run(["ffmpeg","-y","-i",str(inp),"-c","copy",str(out)]); 
+    # 2. Sarvam clean English text
+    log("Transcribe+translate via Sarvam saaras:v3...")
+    text=sarvam_stt_translate(ref, key)
+    log(f"EN text: {text[:200]}")
+    if not text:
+        log("No text; copying original audio."); subprocess.run(["ffmpeg","-y","-i",inp,"-c","copy",out],capture_output=True)
         print(f"OUTPUT={out}"); return
 
-    # 3. translate with NLLB-200 (much better than offline argos for Hindi->English)
-    log("Translating (NLLB-200)...")
-    from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-    NLLB = {"hi": "hin_Deva", "en": "eng_Latn", "bn":"ben_Beng", "ta":"tam_Taml",
-            "te":"tel_Telu", "mr":"mar_Deva", "gu":"guj_Gujr", "kn":"kan_Knda",
-            "ml":"mal_Mlym", "pa":"pan_Guru", "or":"ory_Orya"}
-    src_code = NLLB.get(args.src, "hin_Deva")
-    tgt_code = NLLB.get(args.target, "eng_Latn")
-    tok_nllb = AutoTokenizer.from_pretrained("facebook/nllb-200-distilled-600M")
-    mdl = AutoModelForSeq2SeqLM.from_pretrained("facebook/nllb-200-distilled-600M")
-    # translate sentence by sentence to keep quality on long text
-    import re as _re
-    parts = [p.strip() for p in _re.split(r"(?<=[.!?।])\s+", src_text) if p.strip()]
-    out_parts = []
-    for p in parts:
-        tok_nllb.src_lang = src_code
-        enc = tok_nllb(p, return_tensors="pt", truncation=True, max_length=512)
-        gen = mdl.generate(**enc,
-            forced_bos_token_id=tok_nllb.convert_tokens_to_ids(tgt_code),
-            max_length=512, num_beams=4, no_repeat_ngram_size=3,
-            repetition_penalty=1.3, early_stopping=True)
-        out_parts.append(tok_nllb.batch_decode(gen, skip_special_tokens=True)[0])
-    tgt_text = " ".join(out_parts).strip()
-    log(f"Translated: {tgt_text[:200]}")
-
-    # 4. clone voice with XTTS-v2
+    # 3. XTTS clone voice (speaks Sarvam's clean English in the speaker's voice)
     log("Generating cloned voice (XTTS-v2)...")
     from TTS.api import TTS
-    tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
-    cloned = work / "cloned.wav"
-    tts.tts_to_file(text=tgt_text, speaker_wav=str(ref),
-                    language=args.xtts_lang, file_path=str(cloned))
+    tts=TTS("tts_models/multilingual/multi-dataset/xtts_v2")
+    cloned="_cloned.wav"
+    tts.tts_to_file(text=text, speaker_wav=ref, language=args.xtts_lang, file_path=cloned)
 
-    # 5. mux cloned audio onto video (video copied; -shortest to align)
+    # 4. mux
     log("Muxing cloned audio onto video...")
-    run(["ffmpeg","-y","-i",str(inp),"-i",str(cloned),
-         "-map","0:v:0","-map","1:a:0","-c:v","copy","-c:a","aac","-b:a","192k",
-         "-shortest",str(out)])
-    log(f"DONE -> {out.name}")
+    subprocess.run(["ffmpeg","-y","-i",inp,"-i",cloned,"-map","0:v:0","-map","1:a:0",
+        "-c:v","copy","-c:a","aac","-b:a","192k","-shortest",out],capture_output=True)
+    log(f"DONE -> {out}")
     print(f"OUTPUT={out}")
 
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
