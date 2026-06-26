@@ -57,7 +57,7 @@ jobs:
           grep -iE '\.(mp4|mkv|mov|webm|avi|m4v|ts)$' all.txt > chunks.txt || true
           COUNT=$(grep -c . chunks.txt 2>/dev/null || true); COUNT=${COUNT:-0}
           echo "Found $COUNT chunk(s):"; cat chunks.txt || true
-          ITEMS=$(jq -R -s -c 'split("\n") | map(select(length>0)) | .[0:1] | map({ref: .})' chunks.txt)
+          ITEMS=$(jq -R -s -c 'split("\n") | map(select(length>0)) | .[0:3] | map({ref: .})' chunks.txt)
           echo "matrix={\"item\":$ITEMS}" >> "$GITHUB_OUTPUT"
           echo "count=$COUNT" >> "$GITHUB_OUTPUT"
 
