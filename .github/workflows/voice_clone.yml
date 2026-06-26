@@ -114,8 +114,7 @@ jobs:
         run: |
           IN=$(ls input/ | head -n1)
           echo "==> Cloning: $IN"
-          python clone_chunk.py "input/$IN" --src "$SRC" --target "$TGT" \
-            --model "$MODEL" --out "output/$IN" || true
+          python clone_chunk.py "input/$IN" --out "output/$IN" || true
       - name: Upload result + archive
         if: steps.get.outputs.have == 'yes'
         env:
