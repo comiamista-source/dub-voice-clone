@@ -10,10 +10,10 @@ on:
     inputs:
       src:
         description: "Source language code (whisper/argos, e.g. hi)"
-        default: "hi"
+        default: "Hindi"
       target:
         description: "Target language code (e.g. en)"
-        default: "en"
+        default: "English"
       model:
         description: "Whisper model (large-v3 best, base faster)"
         default: "large-v3"
@@ -29,8 +29,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  SRC: ${{ github.event.inputs.src || 'hi' }}
-  TGT: ${{ github.event.inputs.target || 'en' }}
+  SRC: ${{ github.event.inputs.src || 'Hindi' }}
+  TGT: ${{ github.event.inputs.target || 'English' }}
   MODEL: ${{ github.event.inputs.model || 'large-v3' }}
   CHUNKS_DIR: ${{ github.event.inputs.chunks_dir || 'Dubz/Chunks' }}
   DONE_DIR: ${{ github.event.inputs.done_dir || 'Dubz/ChunksDone' }}
