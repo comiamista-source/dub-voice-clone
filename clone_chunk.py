@@ -48,10 +48,12 @@ def main():
     if not os.path.exists(inp): log(f"ERROR: not found {inp}"); sys.exit(1)
     out=args.out or (os.path.splitext(inp)[0] + " - English DUB.mp4")
 
-    # 1. reference voice
+    # 1. reference voice - use the fixed repo reference (dub_018) if present, else the chunk's own audio
     ref="_ref.wav"
-    log("Extracting reference voice audio...")
-    subprocess.run(["ffmpeg","-y","-i",inp,"-vn","-ac","1","-ar","22050",ref],capture_output=True)
+    fixed = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ref_voice.mp3")
+    ref_src = fixed if os.path.exists(fixed) else inp
+    log(f"Extracting reference voice from: {os.path.basename(ref_src)}")
+    subprocess.run(["ffmpeg","-y","-i",ref_src,"-vn","-ac","1","-ar","22050",ref],capture_output=True)
 
     # 2. Sarvam clean English text
     log("Transcribe+translate via Sarvam saaras:v3...")
